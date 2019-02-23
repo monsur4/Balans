@@ -32,9 +32,9 @@
         android:title="@string/pref_title_favorite_social" />
 
     <CheckBoxPreference
-        android:defaultValue="false"
-        android:key="clear_data_at_midnight"
+        android:defaultValue="true"
+        android:key="first_time_nav_bar_animation"
 
-        android:title="Clear data at Midnight" />
+        android:title="Animate Navigation Bar One Time" />
 
 </PreferenceScreen>

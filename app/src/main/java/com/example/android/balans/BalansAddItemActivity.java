@@ -1,12 +1,14 @@
 package com.example.android.balans;
 
 import android.app.LoaderManager;
+import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.CursorLoader;
 import android.content.Intent;
 import android.content.Loader;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.net.Uri;
 import android.os.AsyncTask;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
@@ -18,6 +20,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.NumberPicker;
 import android.widget.Spinner;
+import android.widget.Toast;
 
 import com.example.android.balans.BalansDatabaseContract.MealInfoEntry;
 
@@ -29,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 public class BalansAddItemActivity extends AppCompatActivity implements LoaderManager.LoaderCallbacks<Cursor> {
     public static final int LOADER_SINGLE_MEAL = 1;
     public static String MEAL_ID = "com.example.android.balans.MEAL_ID";
-    private int mMealId;
+    private long mMealId;
     private boolean mIsNewMeal;
     public static final int ID_NOT_SET = -1;
     String[] costRange;
@@ -105,15 +108,22 @@ public class BalansAddItemActivity extends AppCompatActivity implements LoaderMa
         values.put(MealInfoEntry.COLUMN_MEAL_DETAILS, "");
         values.put(MealInfoEntry.COLUMN_MEAL_TIME_STAMP, "");
 
-        AsyncTask taskInsert = new AsyncTask() {
+        AsyncTask<ContentValues, Void, Uri> taskInsert = new AsyncTask<ContentValues, Void, Uri>() {
             @Override
-            protected Object doInBackground(Object[] objects) {
-                SQLiteDatabase sqLiteDatabase = mDbOpenHelper.getWritableDatabase();
-                mMealId = (int)sqLiteDatabase.insert(MealInfoEntry.TABLE_NAME, null, values);
-                return null;
+            protected Uri doInBackground(ContentValues... contentValues) {
+                Uri newRowUri = getContentResolver().insert(MealInfoEntry.CONTENT_URI, values);
+                return newRowUri;
+            }
+
+            @Override
+            protected void onPostExecute(Uri uri) {
+                if (uri != null)
+                    mMealId = ContentUris.parseId(uri);
+                Toast.makeText(BalansAddItemActivity.this, "Added new row: " + mMealId, Toast.LENGTH_LONG).show();
             }
         };
-        taskInsert.execute();
+        taskInsert.execute(values);
+
     }
 
     private void editSelectedMeal() {
@@ -126,7 +136,7 @@ public class BalansAddItemActivity extends AppCompatActivity implements LoaderMa
         };
 
         String selection = MealInfoEntry.COLUMN_MEAL_ID + " =?";
-        String[] selectionArgs = {Integer.toString(mMealId)};
+        String[] selectionArgs = {Long.toString(mMealId)};
 
         Cursor cursor = sqLiteDatabase.query(
                 MealInfoEntry.TABLE_NAME,
@@ -205,7 +215,7 @@ public class BalansAddItemActivity extends AppCompatActivity implements LoaderMa
                 };
 
                 String selection = MealInfoEntry.COLUMN_MEAL_ID + " =?";
-                String[] selectionArgs = {Integer.toString(mMealId)};
+                String[] selectionArgs = {Long.toString(mMealId)};
 
                 Cursor cursor = sqLiteDatabase.query(
                         MealInfoEntry.TABLE_NAME,
@@ -255,7 +265,7 @@ public class BalansAddItemActivity extends AppCompatActivity implements LoaderMa
 
     private void saveMealToDatabase(String mealType, double mealCost, String mealDetails, long mealTimestamp){
         final String selection = MealInfoEntry.COLUMN_MEAL_ID + " = ?";
-        final String[] selectionArgs = {Integer.toString(mMealId)};
+        final String[] selectionArgs = {Long.toString(mMealId)};
 
         final ContentValues values = new ContentValues();
         values.put(MealInfoEntry.COLUMN_MEAL_TYPE, mealType);
@@ -263,11 +273,12 @@ public class BalansAddItemActivity extends AppCompatActivity implements LoaderMa
         values.put(MealInfoEntry.COLUMN_MEAL_DETAILS, mealDetails);
         values.put(MealInfoEntry.COLUMN_MEAL_TIME_STAMP, mealTimestamp);
 
+        final Uri uriToUpdate  = Uri.withAppendedPath(MealInfoEntry.CONTENT_URI, Long.toString(mMealId));
+
         AsyncTask taskUpdate = new AsyncTask() {
             @Override
             protected Object doInBackground(Object[] objects) {
-                SQLiteDatabase db = mDbOpenHelper.getWritableDatabase();
-                db.update(MealInfoEntry.TABLE_NAME, values, selection, selectionArgs);
+                getContentResolver().update(uriToUpdate, values, selection, selectionArgs);
                 return null;
             }
         };
@@ -280,7 +291,7 @@ public class BalansAddItemActivity extends AppCompatActivity implements LoaderMa
         int selectedCost = mNumberPickerCost.getValue();
         double mealCost = Double.parseDouble(costRange[selectedCost]);
         String mealDetails = mEditTextDetails.getText().toString();
-        long mealTimeStamp = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());//compare date.getTime
+        long mealTimeStamp = TimeUnit.MILLISECONDS.toSeconds(new Date().getTime());//compare date.getTime
 
         saveMealToDatabase(mealType, mealCost, mealDetails, mealTimeStamp);
     }
@@ -301,19 +312,25 @@ public class BalansAddItemActivity extends AppCompatActivity implements LoaderMa
         }
     }
 
+    @Override
+    public void onBackPressed() {
+        super.onBackPressed();
+        mIsCancelling = true;
+    }
+
     private void deleteMealFromDatabase() {
         final String selection = MealInfoEntry.COLUMN_MEAL_ID + " = ? ";
-        final String[] selectionArgs = {Integer.toString(mMealId)};
+        final String[] selectionArgs = {Long.toString(mMealId)};
+        final Uri uriToDelete  = Uri.withAppendedPath(MealInfoEntry.CONTENT_URI, Long.toString(mMealId));
 
         AsyncTask task = new AsyncTask() {
             @Override
             protected Object doInBackground(Object[] objects) {
-                SQLiteDatabase sqLiteDatabase = mDbOpenHelper.getWritableDatabase();
-                sqLiteDatabase.delete(MealInfoEntry.TABLE_NAME, selection, selectionArgs);
+                getContentResolver().delete( uriToDelete, selection, selectionArgs);
                 return null;
             }
         };
-        task.execute();
 
+        task.execute();
     }
 }

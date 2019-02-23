@@ -2,9 +2,12 @@ package com.example.android.balans;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
+import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -12,6 +15,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.IBinder;
 import android.preference.PreferenceManager;
 import android.provider.MediaStore;
 import android.support.annotation.NonNull;
@@ -23,6 +28,7 @@ import android.content.CursorLoader;
 import android.content.Loader;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.view.Gravity;
 import android.view.View;
 import android.support.design.widget.NavigationView;
 import android.support.v4.view.GravityCompat;
@@ -45,6 +51,7 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.Locale;
 
 import com.example.android.balans.BalansDatabaseContract.MealInfoEntry;
 
@@ -53,7 +60,6 @@ public class BalansMainActivity extends AppCompatActivity
     public static final int PICK_IMAGE = 12;
     public static final String THUMBNAIL_PNG = "thumbnail.png";
     public static final int LOADER_TODAYS_MEALS = 0;
-    public static final int PENDING_INTENT_MAIN_ACTIVITY = 23;
     RecyclerView recycler;
     private BalansAdapter mBalansAdapter;
     CircularImageView circularImageView;
@@ -69,7 +75,9 @@ public class BalansMainActivity extends AppCompatActivity
 
     private BalansOpenHelper mDbOpenHelper;
     private Cursor mMealsCursor;
-    private Date mDate;
+    private static Date mDate;
+
+    private BroadcastReceiver mReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -104,6 +112,7 @@ public class BalansMainActivity extends AppCompatActivity
 
         textViewDate = findViewById(R.id.text_view_date);
         textViewDate.setText(setDate());
+        textViewDate.setOnClickListener(this);
 
         DrawerLayout drawer = (DrawerLayout) findViewById(R.id.drawer_layout);
         ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(
@@ -115,25 +124,19 @@ public class BalansMainActivity extends AppCompatActivity
         navigationView.setNavigationItemSelectedListener(this);
 
         recycler = findViewById(R.id.recycler_view);
-        //displayMeals();
         getLoaderManager().initLoader(LOADER_TODAYS_MEALS, null, this);
 
-        setupNewDataEveryMidnight();
-    }
-
-    private void setupNewDataEveryMidnight() {
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        Boolean willClearDataAtMidnight = sharedPreferences.getBoolean("clear_data_at_midnight", false);
-        if(!willClearDataAtMidnight) {
-            setNewDataEveryMidnight();
-            SharedPreferences.Editor editor = sharedPreferences.edit();
-            editor.putBoolean("clear_data_at_midnight", true);
+        SharedPreferences preferenceManager = PreferenceManager.getDefaultSharedPreferences(this);
+        Boolean isFirstTimeAnimation = preferenceManager.getBoolean("first_time_nav_bar_animation", false);
+        if(isFirstTimeAnimation){
+            animateNavigationBar();
+            SharedPreferences.Editor editor = preferenceManager.edit();
+            editor.putBoolean("first_time_nav_bar_animation", false);
             editor.apply();
         }
     }
 
     private void displayMeals() {
-        //DataManager.loadTodaysMealsFromDatabase(mDbOpenHelper);
         final LinearLayoutManager layoutManager = new LinearLayoutManager(this);
         recycler.setLayoutManager(layoutManager);
 
@@ -179,7 +182,7 @@ public class BalansMainActivity extends AppCompatActivity
     }
 
     //It appears I'd finally need to create a job or a service to constantly check and update the time at regular intervals
-    private String setDate() {
+    private static String setDate() {
         mDate = new Date();
         DateFormat dateFormat = DateFormat.getDateInstance();
         String dateString = dateFormat.format(mDate);
@@ -276,25 +279,27 @@ public class BalansMainActivity extends AppCompatActivity
             textViewPlaceHolder.setVisibility(View.VISIBLE);
         }
         getLoaderManager().restartLoader(LOADER_TODAYS_MEALS, null, this);
+        IntentFilter receiverFilter = new IntentFilter(Intent.ACTION_DATE_CHANGED);
+        mReceiver = new AlarmReceiver();
+        registerReceiver(mReceiver, receiverFilter);
     }
 
-    private void setNewDataEveryMidnight(){
-        AlarmManager alarmManager = (AlarmManager) getSystemService(ALARM_SERVICE);
-
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTimeInMillis(System.currentTimeMillis());
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MINUTE, 0);
-
-        Intent intent = getIntent();
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, PENDING_INTENT_MAIN_ACTIVITY, intent, 0);
-        alarmManager.setRepeating(AlarmManager.RTC, calendar.getTimeInMillis(), AlarmManager.INTERVAL_DAY, pendingIntent);
-        Toast.makeText(this, "Meals will be clear Every Midnight", Toast.LENGTH_LONG).show();
+    private void animateNavigationBar() {
+        final DrawerLayout drawer = findViewById(R.id.drawer_layout);
+        drawer.openDrawer(Gravity.START);
+        Handler handler = new Handler();
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                drawer.closeDrawer(Gravity.START);
+            }
+        }, 1000);
     }
 
     @Override
     protected void onDestroy() {
         mDbOpenHelper.close();
+        unregisterReceiver(mReceiver);
         super.onDestroy();
     }
 
@@ -335,7 +340,24 @@ public class BalansMainActivity extends AppCompatActivity
             case R.id.circular_image_view:
                 selectProfilePicture();
                 break;
+            case R.id.text_view_date:
+                openRecentMeals();
         }
+    }
+
+    private void openRecentMeals() {
+        Locale locale = new Locale("en", "NG");
+
+        Calendar calendarForSQlite = Calendar.getInstance(locale);
+        calendarForSQlite.setTime(mDate);
+        calendarForSQlite.add(Calendar.WEEK_OF_YEAR, -1);
+        Date formattedDateToMatchSqlite = calendarForSQlite.getTime();
+
+        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("ww", locale);
+        String weekInYear= simpleDateFormat.format(formattedDateToMatchSqlite);
+        Intent intent = new Intent(this, BalansPreviousItemsActivity.class);
+        intent.putExtra(BalansPreviousItemsActivity.WEEK_IN_YEAR, weekInYear);
+        startActivity(intent);
     }
 
     @Override
@@ -421,4 +443,17 @@ public class BalansMainActivity extends AppCompatActivity
             }
         }
     }
+
+    public class AlarmReceiver extends BroadcastReceiver{
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if(intent.getAction().equals(Intent.ACTION_DATE_CHANGED)) {
+                textViewDate.setText(setDate());
+                getLoaderManager().restartLoader(LOADER_TODAYS_MEALS, null, BalansMainActivity.this);
+                Toast.makeText(context, "Broadcast receiver called", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
 }
